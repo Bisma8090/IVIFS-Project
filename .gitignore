@@ -1,0 +1,11 @@
+# Ignore virtual environment
+venv/
+# Ignore model weights or large files
+*.pt
+*.pth
+*.zip
+*.rar
+
+# Ignore system files
+.DS_Store
+Thumbs.db
