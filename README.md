@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Interactive Visible and Infrared Image Fusion and Segmentation (IVIFS)
 **Simplified Implementation**
 This is a **simplified Python implementation** of the IVIFS framework from the paper  
@@ -66,3 +67,6 @@ python scripts/segmentation_visual.py
  ```bash
 python scripts/metrics_eval.py
    ```
+=======
+# IVIFS-Project
+>>>>>>> c60a929f315ab1fba23c7152f64da5345b221720
