@@ -32,7 +32,7 @@ It reproduces the conceptual design of the IVIFS framework while allowing contro
 
 1. Clone the Repository
 ```bash
-git clone https://github.com/Bisma8090/IVIFS-Simplified.git
+git clone https://github.com/Bisma8090/IVIFS-Project.git
 ```
 2. Navigate to the project directory:
  ```bash
