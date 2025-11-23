@@ -1,4 +1,4 @@
-# src/inference.py  (fusion + segmentation)
+# src/inference.py  (fusion + segmentation overlay)
 import os
 import argparse
 import torch
@@ -7,7 +7,7 @@ from src.datasets import VIFDataset
 from src.models.cvifsm import CVIFSM
 import numpy as np
 from PIL import Image
-import matplotlib.cm as cm  # For applying colormap
+import cv2  # for overlay
 
 def ensure_dir(d):
     if not os.path.exists(d):
@@ -24,7 +24,6 @@ def run_inference(args):
     model.load_state_dict(state)
     model.eval()
 
-    # handle multiple alphas
     alphas = [float(x) for x in args.alpha.split(',')] if isinstance(args.alpha, str) else [float(args.alpha)]
     out_root = args.save_dir
     ensure_dir(out_root)
@@ -51,23 +50,28 @@ def run_inference(args):
                 save_image(fusion_out, os.path.join(fusion_dir, fname[0]))
 
                 # ------------------------
-                # Save segmentation as colorful image (fixed)
+                # Save segmentation overlay on visible image
                 # ------------------------
-                seg_out = torch.sigmoid(seg_logits[0,1:2]).cpu().numpy()  # shape: (1,H,W)
-                seg_out = np.squeeze(seg_out)  # remove singleton dimensions -> H x W
-
-                # Normalize 0-1
+                seg_out = torch.sigmoid(seg_logits[0,1:2]).cpu().numpy()  # (1,H,W)
+                seg_out = np.squeeze(seg_out)  # H x W
                 seg_out_norm = (seg_out - seg_out.min()) / (seg_out.max() - seg_out.min() + 1e-8)
 
-                # Apply colormap safely
-                seg_rgba = cm.jet(seg_out_norm)  # H x W x 4
-                seg_rgb = seg_rgba[:, :, :3]     # drop alpha
-                seg_rgb_uint8 = (seg_rgb * 255).astype(np.uint8)
+                # Convert visible image to HxWx3 uint8
+                vi_np = vi[0].cpu().permute(1,2,0).numpy()
+                vi_np = (vi_np - vi_np.min()) / (vi_np.max() - vi_np.min() + 1e-8)
+                vi_np_uint8 = (vi_np * 255).astype(np.uint8)
 
-                # Save using PIL
-                Image.fromarray(seg_rgb_uint8).save(os.path.join(seg_dir, fname[0]))
+                # Create green mask
+                seg_mask_colored = np.zeros_like(vi_np_uint8)
+                seg_mask_colored[:,:,1] = (seg_out_norm * 255).astype(np.uint8)  # green channel
 
-                print(f"Saved {fname[0]} alpha={a:.2f} (fusion + segmentation)")
+                # Overlay mask on visible image
+                overlay = cv2.addWeighted(vi_np_uint8, 0.7, seg_mask_colored, 0.3, 0)
+
+                # Save overlay
+                Image.fromarray(overlay).save(os.path.join(seg_dir, fname[0]))
+
+                print(f"Saved {fname[0]} alpha={a:.2f} (fusion + segmentation overlay)")
 
     print("Inference complete. Outputs:", out_root)
 
