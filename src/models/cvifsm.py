@@ -1,4 +1,3 @@
-# src/models/cvifsm.py  (fusion-only version)
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,13 +10,15 @@ class ConvBlock(nn.Module):
             nn.BatchNorm2d(out_ch),
             nn.ReLU(inplace=True)
         )
-    def forward(self, x): return self.net(x)
+    def forward(self, x): 
+        return self.net(x)
 
 class Downsample(nn.Module):
     def __init__(self):
         super().__init__()
         self.pool = nn.AvgPool2d(2)
-    def forward(self, x): return self.pool(x)
+    def forward(self, x): 
+        return self.pool(x)
 
 class AttModalInteraction(nn.Module):
     def __init__(self, ch):
@@ -40,7 +41,7 @@ class AttModalInteraction(nn.Module):
             alpha = alpha.view(-1,1,1,1)
 
         v = alpha * f_vis
-        r = (1.0 - alpha) * f_ir
+        r = (1.0 - alpha) * (f_ir * 0.5)
         combined = v + r
 
         ca = self.channel_fc(combined)
@@ -55,7 +56,8 @@ class FeatureAggregator(nn.Module):
     def __init__(self, in_ch, out_ch):
         super().__init__()
         self.conv = ConvBlock(in_ch, out_ch)
-    def forward(self, x): return self.conv(x)
+    def forward(self, x): 
+        return self.conv(x)
 
 class FusionDecoder(nn.Module):
     def __init__(self, in_ch, mid_ch=64, out_ch=3):
@@ -66,11 +68,12 @@ class FusionDecoder(nn.Module):
             ConvBlock(mid_ch, max(mid_ch//2, 8)),
             nn.Conv2d(max(mid_ch//2,8), out_ch, 1)
         )
-    def forward(self, x): return self.dec(x)
+    def forward(self, x): 
+        return self.dec(x)
 
 class CVIFSM(nn.Module):
     """
-    Fusion-only CVIFSM
+    Fusion + dummy segmentation CVIFSM (batch-safe)
     """
     def __init__(self, base_ch=32, att_enable=True, use_mask=True):
         super().__init__()
@@ -94,7 +97,6 @@ class CVIFSM(nn.Module):
         self.att2 = AttModalInteraction(base_ch*4) if att_enable else None
 
         self.agg = FeatureAggregator(base_ch*8, base_ch*4)
-
         self.fusion_head = FusionDecoder(base_ch*4, mid_ch=base_ch*4, out_ch=3)
 
     def forward(self, vi, ir, alpha=0.5, mask=None):
@@ -124,9 +126,11 @@ class CVIFSM(nn.Module):
             if mask.dim() == 3:
                 mask = mask.unsqueeze(1)
             mask_feat = F.interpolate(mask.float(), size=feat.shape[2:], mode='bilinear', align_corners=False)
-            feat = feat * mask_feat + feat * (1 - mask_feat)
+            # feat = feat * mask_feat + feat * (1 - mask_feat)
 
         fused = self.fusion_head(feat)
         fused = F.interpolate(fused, size=(H, W), mode='bilinear', align_corners=False)
 
-        return fused
+        # dummy segmentation logits (2-class) for FusionLoss
+        seg_logits = torch.zeros(B, 2, H, W, device=vi.device)
+        return fused, seg_logits

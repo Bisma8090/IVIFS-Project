@@ -9,7 +9,7 @@ import random
 
 class VIFDataset(Dataset):
     """
-    Paired Visible-Infrared dataset loader.
+    Paired Visible-Infrared dataset loader with optional segmentation masks.
     """
     def __init__(self, root, mode='train', label_dir=None, img_size=(240,320), transform=None):
         super().__init__()
@@ -32,17 +32,11 @@ class VIFDataset(Dataset):
         self.vis_dir = vis_dir
         self.ir_dir = ir_dir
 
-        # labels (not used in your dataset)
-        self.lbl_dir = None
-
         # transforms
         self.to_tensor = T.Compose([
             T.Resize(self.img_size),
             T.ToTensor()
         ])
-
-    def __len__(self):
-        return len(self.names)
 
     def random_binary_mask(self, H, W, max_regions=4):
         mask = np.zeros((H, W), dtype=np.uint8)
@@ -72,26 +66,36 @@ class VIFDataset(Dataset):
 
         H, W = vis_t.shape[1], vis_t.shape[2]
 
-        # ---------------------------
-        # 🔥 FIX: ALWAYS return a valid segmentation label
-        # ---------------------------
+        # Load mask if present
+        mask = None
+        if self.label_dir is not None:
+            mask_path = os.path.join(self.label_dir, fname)
+            if os.path.isfile(mask_path):
+                m = Image.open(mask_path).convert('L')
+                m = m.resize((W, H), Image.NEAREST)
+                m_np = np.array(m)
+                m_bin = (m_np > 127).astype(np.uint8)
+                mask = torch.from_numpy(m_bin).float()
+
+        if mask is None:
+            if self.mode == "train":
+                mask_np = self.random_binary_mask(H, W)
+            else:
+                mask_np = np.ones((H, W), dtype=np.uint8)
+            mask = torch.from_numpy(mask_np).float()
+
         label = torch.zeros((H, W), dtype=torch.long)
-
-        # mask
-        if self.mode == "train":
-            mask_np = self.random_binary_mask(H, W)
-        else:
-            mask_np = np.ones((H, W), dtype=np.uint8)
-
-        mask = torch.from_numpy(mask_np).float()
-
         return vis_t, ir_t, label, mask, fname
+
+    # ✅ len method must be inside the class
+    def __len__(self):
+        return len(self.names)
 
 
 if __name__ == "__main__":
     import sys
     root = sys.argv[1] if len(sys.argv) > 1 else "data/custom_dataset/TRAIN"
-    ds = VIFDataset(root, mode='train', img_size=(480,640))
+    ds = VIFDataset(root, mode='train', label_dir="data/custom_dataset/MASKS", img_size=(480,640))
     print("Dataset size:", len(ds))
     v,i,lab,m,name = ds[0]
     print("sample shapes:", v.shape, i.shape, "label:", lab.shape, "mask:", m.shape, "name:", name)

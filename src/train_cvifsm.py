@@ -1,8 +1,6 @@
-# src/train_cvifsm.py  (fusion-only training)
 import os
 import argparse
 from tqdm import tqdm
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import torchvision.utils as vutils
@@ -29,7 +27,7 @@ def train(args):
     test_loader  = DataLoader(test_ds, batch_size=1, shuffle=False, num_workers=0)
 
     model = CVIFSM(base_ch=args.base_ch, att_enable=not args.disable_amim, use_mask=not args.disable_mask).to(device)
-    loss_fn = FusionLoss(w_l1=args.w_l1, w_grad=args.w_grad)
+    loss_fn = FusionLoss(w_l1=args.w_l1, w_grad=args.w_grad, w_seg=args.w_seg)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     for epoch in range(args.epochs):
@@ -37,13 +35,20 @@ def train(args):
         running = 0.0
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs}")
         for vi, ir, label, mask, fname in pbar:
-            vi = vi.to(device); ir = ir.to(device); mask = mask.to(device)
+            vi = vi.to(device)
+            ir = ir.to(device)
+            mask = mask.to(device)
+            label = label.to(device)
+
             alpha = torch.rand(vi.size(0), device=device).view(vi.size(0),1,1,1) if args.random_alpha else torch.full((vi.size(0),1,1,1), args.alpha, device=device)
 
-            fused = model(vi, ir, alpha=alpha, mask=mask)
-            loss = loss_fn(fused, vi, ir, alpha)
+            fused, seg_logits = model(vi, ir, alpha=alpha, mask=mask)
+            loss = loss_fn(fused, vi, ir, alpha, seg_logits=seg_logits, seg_target=label)
 
-            opt.zero_grad(); loss.backward(); opt.step()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
             running += float(loss.item())
             pbar.set_postfix({'loss': f"{running/((pbar.n+1)):.4f}"})
 
@@ -56,15 +61,19 @@ def train(args):
         with torch.no_grad():
             saved = 0
             for vi, ir, label, mask, fname in test_loader:
-                vi = vi.to(device); ir = ir.to(device); mask = mask.to(device)
+                vi = vi.to(device)
+                ir = ir.to(device)
+                mask = mask.to(device)
                 alpha_test = torch.full((vi.size(0),1,1,1), args.alpha, device=device)
-                fused = model(vi, ir, alpha=alpha_test, mask=mask)
+
+                fused, seg_logits = model(vi, ir, alpha=alpha_test, mask=mask)
                 out = image_to_save(fused[0].cpu())
                 vutils.save_image(out, os.path.join(sample_dir, f"epoch{epoch:03d}_{fname[0]}"))
                 saved += 1
-                if saved >= args.num_samples: break
+                if saved >= args.num_samples:
+                    break
 
-    # save final model (as model field for compatibility)
+    # save final model
     torch.save({'epoch': args.epochs-1, 'model': model.state_dict()}, os.path.join(args.save_dir, "model_cvifsm.pth"))
     print("Training finished. Outputs saved to", args.save_dir)
 
@@ -72,7 +81,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_root', type=str, default='data/custom_dataset')
     parser.add_argument('--save_dir', type=str, default='experiments/outputs/run1')
-    parser.add_argument('--img_size', type=tuple, default=(480,640))
+    # 🔥 fix: nargs=2 + convert to tuple
+    parser.add_argument('--img_size', type=int, nargs=2, default=[480, 640],
+                        help="Image size H W, e.g., --img_size 240 320")  
     parser.add_argument('--batch_size', type=int, default=2)
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--lr', type=float, default=6e-5)
@@ -83,6 +94,10 @@ if __name__ == "__main__":
     parser.add_argument('--disable_mask', action='store_true')
     parser.add_argument('--w_l1', type=float, default=1.0)
     parser.add_argument('--w_grad', type=float, default=1.0)
+    parser.add_argument('--w_seg', type=float, default=1.0)
     parser.add_argument('--num_samples', type=int, default=6)
+
     args = parser.parse_args()
+    # convert list to tuple
+    args.img_size = tuple(args.img_size)
     train(args)
